@@ -1,5 +1,5 @@
-"""Model wrapper: chat prompts, batched greedy generation with confidence,
-yes/no scoring, LoRA "sleep" training and a small MMLU probe."""
+"""Model wrapper: batched greedy generation with confidence, yes/no scoring,
+LoRA "sleep" training and a small MMLU probe."""
 import random
 
 import torch
@@ -7,25 +7,7 @@ import torch.nn.functional as F
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-SYSTEM = ("You are a personal assistant with long-term memory of the people the user knows. "
-          "Answer questions briefly and factually. If you do not know the answer, say that you "
-          "do not know.")
-CHECKER_SYSTEM = "You are a careful fact checker."
-
-
-def closed_book(question):
-    return f"Question: {question}\nAnswer in a few words."
-
-
-def open_book(source_text, question):
-    return f"{source_text}\n\nQuestion: {question}\nAnswer in a few words."
-
-
-def support_prompt(source_text, question, answer):
-    return (f"Source text:\n{source_text}\n\nQuestion: {question}\nProposed answer: {answer}\n\n"
-            "Is this answer stated directly in the source text about the exact person or thing the "
-            "question asks about? Reply 'no' if the text only suggests it, or states it about a "
-            "different person, place or thing. Reply with only 'yes' or 'no'.")
+from wsms.models.prompts import CHECKER_SYSTEM, SYSTEM, closed_book
 
 
 class Engine:
@@ -215,10 +197,3 @@ class Engine:
         self.model.eval()
         return last, steps
 
-
-def load_mmlu(n=300, seed=1234):
-    from datasets import load_dataset
-    ds = load_dataset("cais/mmlu", "all", split="test")
-    idx = list(range(len(ds)))
-    random.Random(seed).shuffle(idx)
-    return [(ds[i]["question"], ds[i]["choices"], int(ds[i]["answer"])) for i in idx[:n]]

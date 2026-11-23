@@ -9,6 +9,8 @@ A language model reads a simulated 30-day stream of documents and user remarks. 
 - A remark that contradicts a stored fact, or what both models already know, is not written.
 - Every night also rehearses refusals and the frozen model's own answers to general questions.
 
+![Overview: the two-model write gate during the day and the trust layers written at night](results/figures/fig1_wsms.png)
+
 ## Results
 
 All values are percentages after 30 nights, mean ± standard deviation over three streams (seeds 1 to 3).
@@ -46,38 +48,105 @@ All values are percentages after 30 nights, mean ± standard deviation over thre
 
 ![Recall and false assertions over 30 nights](results/figures/fig2_curves.png)
 
-## Files
+## Repository layout
 
-| File | Purpose |
+```
+wsms/                       library
+├── data/
+│   ├── world.py            synthetic stream: invented people, documents, true and false user remarks
+│   └── benchmarks.py       MMLU items and anchor questions (WebQuestions)
+├── models/
+│   ├── engine.py           model wrapper: answering, yes/no judgement, one night of LoRA training
+│   └── prompts.py          prompts of the reader and of the support check
+├── memory/
+│   ├── gate.py             the write gate: support, source, conflict veto, trust levels
+│   └── rehearsal.py        replay, refusals and anchor answers trained at night
+├── experiment/
+│   ├── wake.py             awake phase with the frozen models
+│   └── consolidation.py    30 nights under one policy
+├── analysis/
+│   ├── metrics.py          metrics of one run
+│   ├── aggregate.py        summary over streams
+│   ├── gate_theory.py      error rates of the two gate signals
+│   └── figures.py          figures
+└── utils/
+    ├── text.py             answer matching and scoring
+    ├── io.py               JSON helpers
+    └── plotting.py         figure style
+scripts/                    command-line entry points
+tests/                      unit tests and checks of the result files
+results/                    result files of all reported runs
+```
+
+| Result file | Content |
 |---|---|
-| `world.py` | Generator of the stream: invented people, documents, true and false user remarks, questions and answer scoring. |
-| `engine.py` | Model wrapper: answering, yes/no judgement, LoRA training for one night, MMLU. |
-| `wake.py` | Awake phase of one stream with the frozen models (reader answers, support judgements, closed-book answers, anchor answers). |
-| `run.py` | 30 nights of consolidation for one policy and one stream. |
-| `metrics.py`, `aggregate.py` | Metrics of one run; `summary.json` and the result table of one model. |
-| `gate_theory.py` | Measured error rates of the two gate signals. |
-| `figures.py` | Figures. |
-| `run_all.sh` | Every run of the paper. |
-| `results/<model>/<policy>_s<seed>.json` | One file per run: arguments, the facts of the stream, the gate decision for every candidate memory, answer codes after every third night, final answers. |
+| `results/<model>/<policy>_s<seed>.json` | One run: arguments, the facts of the stream, the gate decision for every candidate memory, answer codes after every third night, final answers. |
 | `results/<model>/summary.json`, `results/table_<model>.txt` | Aggregated metrics. |
 | `results/wake/` | Awake-phase caches and anchor answers used by the runs. |
-| `results/theory_*.json` | Output of `gate_theory.py`. |
+| `results/theory_*.json` | Error rates of the gate signals. |
+| `results/figures/` | Figures. |
 
 Answer codes in the run files: 0 other, 1 true, 2 false, 3 refusal, 4 / 5 / 6 true / false / other given as a user claim.
 
-## Reproduce
+## Installation
 
 ```bash
-pip install -r requirements.txt
-./run_all.sh                                   # all runs; a run whose result file exists is skipped
-python aggregate.py results/qwen2.5-1.5b
-python aggregate.py results/qwen3-4b
-python gate_theory.py q15 results/theory_q15.json 1 2 3
-python gate_theory.py q4 results/theory_q4.json 1 2 3
-python figures.py results results/figures
+pip install -e .                 # the package and its dependencies
+pip install -r requirements.txt  # optional: the exact versions used for the reported runs
 ```
 
-The result files of all reported runs are included, so every command after `run_all.sh` works without running a model. To run the experiments again, point `WSMS_ROOT` to an empty folder: `WSMS_ROOT=rerun ./run_all.sh`.
+## Usage
+
+Run everything (awake-phase caches, then every policy on three streams; a run whose result file exists is skipped):
+
+```bash
+scripts/run_all.sh
+```
+
+Or step by step:
+
+```bash
+# 1. awake phase of one stream (frozen models only)
+python scripts/build_wake_cache.py --sleeper Qwen/Qwen2.5-1.5B-Instruct --helper Qwen/Qwen3-4B-Instruct-2507 \
+    --seed 1 --out results/wake/q15_s1.json --anchors results/wake/anchors_q15.json
+
+# 2. 30 nights under one policy
+python scripts/run_consolidation.py --model Qwen/Qwen2.5-1.5B-Instruct --cache results/wake/q15_s1.json \
+    --anchors results/wake/anchors_q15.json --policy gate --refuse 0.15 --anchor 0.3 \
+    --name wsms --seed 1 --out results/qwen2.5-1.5b
+
+# 3. analysis (works on the included result files, no model needed)
+python scripts/aggregate_results.py results/qwen2.5-1.5b > results/table_qwen2.5-1.5b.txt
+python scripts/aggregate_results.py results/qwen3-4b > results/table_qwen3-4b.txt
+python scripts/gate_error_rates.py q15 results/theory_q15.json 1 2 3
+python scripts/gate_error_rates.py q4 results/theory_q4.json 1 2 3
+python scripts/make_figures.py results results/figures
+python scripts/inspect_run.py results/qwen3-4b/wsms_s1.json
+```
+
+To run the experiments again from scratch, point `WSMS_ROOT` to an empty folder: `WSMS_ROOT=rerun scripts/run_all.sh`.
+
+The write gate can also be used on its own:
+
+```python
+from wsms.memory.gate import WriteGate
+
+gate = WriteGate(policy="gate", support="society", veto="society", hearsay="tag")
+candidate = {"ep": {"source": "user"}, "answer": "Tarmel", "key": (False, 1), "label": "true",
+             "target": "Tarmel", "level": "fact", "why": "",
+             "row": {"p_self": 0.93, "p_helper": 0.88, "cb_self": None, "cb_helper": None, "cf_self": None}}
+gate.decide(candidate, day=1)     # "accept_hearsay"
+candidate["target"]               # "According to the user (unconfirmed): Tarmel"
+```
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The tests cover answer scoring, the stream generator and the gate rules. They also check the result files against the code: the gate reproduces every logged decision of every run, and the summaries equal what the metrics give for the run files.
 
 ## Models and data
 

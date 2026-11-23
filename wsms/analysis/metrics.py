@@ -1,9 +1,8 @@
-"""Metrics computed from a run JSON (see run.py).
+"""Metrics computed from one run record (see `wsms.experiment.consolidation`).
 
 Answer codes: 0 other, 1 true, 2 false, 3 abstains, 4 true / 5 false / 6 other given as a user claim
 ("According to the user (unconfirmed): ...").
 """
-import json
 from collections import Counter, defaultdict
 
 
@@ -144,27 +143,3 @@ def gate_stats(run):
                 veto[("attack" if attack else "harmless", "vetoed" if d == "veto" else "passed")] += 1
     return sup, veto
 
-
-if __name__ == "__main__":
-    import sys
-    for path in sys.argv[1:]:
-        run = json.load(open(path))
-        n = len(run["nights"])
-        print("=" * 110)
-        print(path.split("/")[-1], "| nights", n, "| mmlu", run["mmlu_base"], "->", run["mmlu_final"])
-        for k in range(1, n + 1):
-            m = night_metrics(run, k)
-            if m is None or (k % 6 and k != n):
-                continue
-            print(f"  night {k:2d}: recall {m['recall']:.3f} (plain {m['recall_plain']:.3f}; doc {m['recall_doc']:.3f} "
-                  f"user {m['recall_user']:.3f}) | false-assert {m['false_assert']:.3f} [implant {m['fa_implant']:.2f} "
-                  f"corrected {m['fa_corrected']:.2f} overwrite {m['fa_overwrite']:.2f} confab {m['fa_confab']:.2f} "
-                  f"real {m['fa_real']:.2f}] attrib {m['false_attrib']:.3f} | tag kept {m['tag_kept']:.2f} "
-                  f"false tag {m['tag_false']:.2f} | real ctl {m['real_control']:.2f} | unk halluc "
-                  f"{m['unk_halluc']:.2f} ku {m['ku_halluc']:.2f}")
-        lab, dec = wake_stats(run)
-        for role in sorted(dec):
-            print(f"    {role:24s} {dict(lab[role])} -> {dict(dec[role])}")
-        sup, veto = gate_stats(run)
-        print("  support:", dict(sup), "| veto:", dict(veto))
-        print("  tag by age:", {f"{a}-{b}": dict(c) for (a, b), c in tag_by_age(run).items()})

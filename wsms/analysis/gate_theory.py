@@ -1,24 +1,22 @@
 """Measured error rates of the two gate signals, from the awake-phase caches (frozen models only).
 
-usage: python gate_theory.py <cache tag: q15|q4> <out.json> [seeds...]
   eps = P(check passes | answer NOT stated by the source)     (false accept)
   dlt = P(check blocks | answer stated by the source)         (false reject)
   veto: detection on false claims about known real-world facts, false alarms on new claims
 """
-import json
 import os
-import sys
 from collections import Counter
 
-from world import World, has, is_abstain, same_answer
+from wsms.data.world import World
+from wsms.utils.io import read_json
+from wsms.utils.text import has, is_abstain, same_answer
 
-W = os.path.join(os.environ.get("WSMS_ROOT", "results"), "wake", "")
 
-
-def main(tag, out, seeds):
+def gate_error_rates(tag, seeds, wake_dir="results/wake"):
+    """Error rates of the support signals and of the conflict veto for one model pair (cache tag)."""
     c = Counter()
     for seed in seeds:
-        cache = json.load(open(f"{W}{tag}_s{seed}.json"))
+        cache = read_json(os.path.join(wake_dir, f"{tag}_s{seed}.json"))
         w = World(seed, days=cache["days"])
         w.set_real(cache["known"])
         cands = [(ep, pr) for d in range(1, cache["days"] + 1) for ep in w.schedule[d] for pr in ep["probes"]]
@@ -56,14 +54,17 @@ def main(tag, out, seeds):
            "bait": d("confab_bait", "confab"),
            "veto_det_self": d("att_self", "att"), "veto_det_cons": d("att_cons", "att"),
            "veto_fa_self": d("new_self", "new"), "veto_fa_cons": d("new_cons", "new")}
-    json.dump(res, open(out, "w"), indent=1)
+    return res
+
+
+def format_report(tag, res):
+    """Two lines of text for one model pair."""
     p = lambda k: f"{100 * res[k]:.1f}%"
-    print(f"[{tag}] helper {cache['helper']} | not stated n={c['ns']}: eps1 {p('eps1')} eps2 {p('eps2')} both {p('eps12')} "
-          f"(product {100 * res['eps1'] * res['eps2']:.1f}%) | stated n={c['st']}: dlt1 {p('dlt1')} dlt2 {p('dlt2')} "
-          f"both {p('dlt12')} | bait taken {p('bait')}")
-    print(f"      veto on real-world false claims n={c['att']}: self {p('veto_det_self')} consensus {p('veto_det_cons')} | "
-          f"false alarms on new claims n={c['new']}: self {p('veto_fa_self')} consensus {p('veto_fa_cons')}")
-
-
-if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], [int(s) for s in sys.argv[3:]] or [1, 2, 3])
+    n = res["counts"]
+    return [
+        f"[{tag}] helper {res['helper']} | not stated n={n['ns']}: eps1 {p('eps1')} eps2 {p('eps2')} "
+        f"both {p('eps12')} (product {100 * res['eps1'] * res['eps2']:.1f}%) | stated n={n['st']}: "
+        f"dlt1 {p('dlt1')} dlt2 {p('dlt2')} both {p('dlt12')} | bait taken {p('bait')}",
+        f"      veto on real-world false claims n={n['att']}: self {p('veto_det_self')} consensus "
+        f"{p('veto_det_cons')} | false alarms on new claims n={n['new']}: self {p('veto_fa_self')} "
+        f"consensus {p('veto_fa_cons')}"]

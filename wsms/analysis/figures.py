@@ -1,60 +1,18 @@
-"""Paper figures (print, single text column = 80 mm wide).
-
-usage: python figures.py results/<model_tag> out_dir
-"""
-import json
+"""Figures: the system overview and the curves of recall and false assertions over the nights."""
 import os
-import sys
 
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch, Polygon
 
-# categorical slots 1-3 of the validated palette + neutral for the reference line
-C_NAIVE, C_DOC, C_GATE, C_ORACLE = "#eb6834", "#2a78d6", "#1baf7a", "#8a8984"
-INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
-W_IN = 3.25
-
-
-def _font():
-    names = {f.name for f in font_manager.fontManager.ttflist}
-    for cand in ("Times New Roman", "Liberation Serif", "Nimbus Roman", "TeX Gyre Termes", "DejaVu Serif"):
-        if cand in names:
-            return cand
-    return "serif"
-
-
-def _style():
-    plt.rcParams.update({"font.family": _font(), "font.size": 8, "axes.edgecolor": MUTED,
-                         "axes.linewidth": 0.6, "xtick.color": MUTED, "ytick.color": MUTED,
-                         "text.color": INK, "axes.labelcolor": INK, "xtick.major.width": 0.6,
-                         "ytick.major.width": 0.6, "xtick.major.size": 2.5, "ytick.major.size": 2.5,
-                         "savefig.dpi": 400, "figure.dpi": 150})
-
-
-def _sans():
-    names = {f.name for f in font_manager.fontManager.ttflist}
-    for cand in ("Lato", "Carlito", "Calibri", "Liberation Sans", "Arial", "Nimbus Sans", "DejaVu Sans"):
-        if cand in names:
-            return cand
-    return "sans-serif"
-
-
-# soft panel fill and dark chip colour per role in Fig. 1
-P_GATE = ("#cfe7db", "#1a7a57")
-P_BLOCK = ("#deddd9", "#8d8c88")
-P_CLAIM = ("#ddd3ee", "#7650b0")
-P_FACT = ("#cbdff4", "#2867ae")
-P_CORE = ("#f4f3ef", "#55534f")
-P_REH = ("#f1d2cc", "#b85a52")
+from wsms.utils.io import read_json
+from wsms.utils.plotting import (C_DOC, C_GATE, C_NAIVE, C_ORACLE, GRID, INK, P_BLOCK, P_CLAIM, P_CORE, P_FACT,
+                                 P_GATE, P_REH, W_IN, apply_style, sans_font, serif_font)
 
 
 def schematic(out):
     """Fig. 1: (a) the two-model write gate during the day, (b) the trust layers written at night."""
-    _style()
-    font = _sans()
+    apply_style()
+    font = sans_font()
     x_lo, x_hi, y_lo, y_hi = 0.0, 100.0, 1.2, 89.6
     fig = plt.figure(figsize=(W_IN, W_IN * (y_hi - y_lo) / (x_hi - x_lo)))
     ax = fig.add_axes([0, 0, 1, 1])
@@ -203,7 +161,7 @@ PANELS = [("recall", "Recall of true facts (%)"), ("false_assert", "False assert
 
 def curves(models, out):
     """models: list of (title, summary). Rows = metrics, columns = models."""
-    _style()
+    apply_style()
     ncol = len(models)
     fig, axes = plt.subplots(2, ncol, figsize=(W_IN, 2.6), sharex=True, sharey="row", squeeze=False)
     for ci, (title, summary) in enumerate(models):
@@ -244,15 +202,18 @@ def curves(models, out):
     plt.close(fig)
 
 
-if __name__ == "__main__":
-    root, out_dir = sys.argv[1], sys.argv[2]
+MODELS = (("qwen2.5-1.5b", "Qwen2.5-1.5B"), ("qwen3-4b", "Qwen3-4B"))
+
+
+def make_all(root, out_dir):
+    """Write both figures from the summaries found under `root`."""
     os.makedirs(out_dir, exist_ok=True)
     schematic(os.path.join(out_dir, "fig1_wsms.png"))
     models = []
-    for tag, title in (("qwen2.5-1.5b", "Qwen2.5-1.5B"), ("qwen3-4b", "Qwen3-4B")):
+    for tag, title in MODELS:
         path = os.path.join(root, tag, "summary.json")
         if os.path.exists(path):
-            models.append((title, json.load(open(path))))
+            models.append((title, read_json(path)))
     if models:
         curves(models, os.path.join(out_dir, "fig2_curves.png"))
-    print("figures written to", out_dir, "| font:", _font())
+    return serif_font()

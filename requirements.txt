@@ -1,6 +1,6 @@
+# Versions used for the reported runs.
 torch==2.11.0
 transformers==5.23.0
 peft==0.21.3
 datasets==5.2.0
 matplotlib==3.11.2
-numpy==2.5.5

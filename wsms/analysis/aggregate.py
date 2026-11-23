@@ -1,15 +1,11 @@
-"""Aggregate run JSONs of one model into summary.json and print tables.
-
-usage: python aggregate.py <runs folder of one model>
-"""
+"""Aggregate the run files of one model: final metrics, curves and gate statistics."""
 import glob
-import json
 import os
 import statistics as st
-import sys
 from collections import Counter, defaultdict
 
-from metrics import fa_causes, gate_stats, night_metrics, tag_by_age, wake_stats
+from wsms.analysis.metrics import fa_causes, gate_stats, night_metrics, tag_by_age, wake_stats
+from wsms.utils.io import read_json
 
 KEYS = ["recall", "recall_plain", "recall_doc", "recall_user", "false_assert", "false_attrib",
         "fa_implant", "fa_implant_once", "fa_implant_persist", "attrib_implant", "fa_corrected",
@@ -25,13 +21,20 @@ def ms(vals):
     return [st.mean(vals), st.stdev(vals) if len(vals) > 1 else 0.0]
 
 
-def main(folder):
+def load_runs(folder):
+    """Run records of one model, grouped by condition name."""
     runs = defaultdict(list)
     for path in sorted(glob.glob(os.path.join(folder, "*.json"))):
         if os.path.basename(path) == "summary.json":
             continue
-        r = json.load(open(path))
+        r = read_json(path)
         runs[r["name"]].append(r)
+    return runs
+
+
+def summarize(folder):
+    """Mean and standard deviation over streams for every condition found in `folder`."""
+    runs = load_runs(folder)
     summary = {"conditions": {}}
     for name, rs in runs.items():
         n = min(len(r["nights"]) for r in rs)
@@ -80,25 +83,26 @@ def main(folder):
     summary["model"] = allr[0]["args"]["model"]
     summary["helper"] = allr[0].get("helper")
     summary["n_trainable"] = allr[0]["n_trainable"]
-    json.dump(summary, open(os.path.join(folder, "summary.json"), "w"), indent=1)
+    return summary
 
+
+def format_table(summary):
+    """Lines of the result table of one model."""
+    lines = []
     pct = lambda v: f"{100 * v[0]:5.1f}±{100 * v[1]:4.1f}"
-    print(f"model {summary['model']} | helper {summary['helper']} | base: MMLU {100 * summary['base']['mmlu'][0]:.1f}, "
-          f"halluc. on unknown {100 * summary['base']['unk_halluc'][0]:.0f}%")
+    lines.append(f"model {summary['model']} | helper {summary['helper']} | base: MMLU {100 * summary['base']['mmlu'][0]:.1f}, "
+                 f"halluc. on unknown {100 * summary['base']['unk_halluc'][0]:.0f}%")
     hdr = ["condition", "n", "Recall", "R-plain", "R-doc", "R-user", "FalseAss", "Attrib", "Implant", "Corrctd",
            "Overwr", "Confab", "Real", "RealCtl", "TagKept", "TagFalse", "UnkHall", "MMLU"]
-    print(" | ".join(f"{h:>10s}" for h in hdr))
+    lines.append(" | ".join(f"{h:>10s}" for h in hdr))
     for name, c in summary["conditions"].items():
         f = c["final"]
         row = [name[:10], str(len(c["seeds"]))] + [pct(f[k]) for k in (
             "recall", "recall_plain", "recall_doc", "recall_user", "false_assert", "false_attrib", "fa_implant",
             "fa_corrected", "fa_overwrite", "fa_confab", "fa_real", "real_control", "tag_kept", "tag_false",
             "unk_halluc")] + [f"{100 * c['mmlu_final'][0]:.1f}"]
-        print(" | ".join(f"{x:>10s}" for x in row))
+        lines.append(" | ".join(f"{x:>10s}" for x in row))
     for name, c in summary["conditions"].items():
         if c["support_check"] or c["tag_by_age"]:
-            print(f"[{name}] causes {c['fa_causes']} | support {c['support_check']} | veto {c['veto_check']} | tag by age {c['tag_by_age']}")
-
-
-if __name__ == "__main__":
-    main(sys.argv[1])
+            lines.append(f"[{name}] causes {c['fa_causes']} | support {c['support_check']} | veto {c['veto_check']} | tag by age {c['tag_by_age']}")
+    return lines
